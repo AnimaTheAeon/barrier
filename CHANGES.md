@@ -1,0 +1,12 @@
+# Barrier changes
+
+Each version's "- " lines become its release notes.
+
+## 1.1.0
+
+- Barrier is now a Synology package: install the .spk in Package Center. No more copying folders or building in Container Manager
+- No Task Scheduler boot task needed: Barrier switches the VPN's tunnel device on by itself
+- Updates card: Update now, and install updates automatically (on by default). Only Barrier's app restarts; the container and Lifestream inside it keep running, the kill switch stays on, and it reconnects to the same location
+- If a new version won't start, Barrier goes back to the one that came with the package
+- Page password moved into Settings, where you can change or remove it
+- On first start, brings over the login, locations, settings and page password from the old Container Manager project

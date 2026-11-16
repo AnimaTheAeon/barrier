@@ -1,0 +1,519 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Barrier</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#171b22; --panel2:#1e242d; --line:#2a323d; --text:#e8ecf1; --mute:#8b97a6;
+    --accent:#3ddc97; --accent-d:#1f8f61; --warn:#f5b84b; --bad:#ff6b6b; --blue:#5aa9ff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .wrap{max-width:900px;margin:0 auto;padding:20px 16px 60px}
+  header{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:18px}
+  h1{font-size:22px;margin:0;letter-spacing:.3px}
+  .sub{color:var(--mute);font-size:13px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:16px}
+  h2{font-size:16px;margin:0 0 12px}
+  .banner{border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:14px}
+  .banner.warn{background:#3a2e12;border:1px solid #6b5420;color:#ffd98a}
+  .banner.bad{background:#3a1717;border:1px solid #7a2c2c;color:#ffb3b3}
+
+  /* hero */
+  .hero{display:flex;gap:28px;align-items:center;flex-wrap:wrap}
+  .power{width:150px;height:150px;border-radius:50%;border:6px solid var(--line);background:var(--panel2);color:var(--text);
+    cursor:pointer;display:flex;align-items:center;justify-content:center;flex-direction:column;font-size:14px;font-weight:600;
+    transition:.2s;flex:none}
+  .power svg{width:46px;height:46px;margin-bottom:4px}
+  .power:hover{filter:brightness(1.15)}
+  .power:disabled{opacity:.5;cursor:not-allowed}
+  .s-connected .power{border-color:var(--accent);box-shadow:0 0 28px rgba(61,220,151,.35);color:var(--accent)}
+  .s-connecting .power,.s-reconnecting .power{border-color:var(--warn);color:var(--warn);animation:pulse 1.4s infinite}
+  .s-auth_failed .power,.s-error .power{border-color:var(--bad);color:var(--bad)}
+  @keyframes pulse{50%{box-shadow:0 0 22px rgba(245,184,75,.45)}}
+  .info{flex:1;min-width:230px}
+  .state{font-size:24px;font-weight:700;margin-bottom:2px}
+  .s-connected .state{color:var(--accent)}
+  .s-connecting .state,.s-reconnecting .state{color:var(--warn)}
+  .s-auth_failed .state,.s-error .state{color:var(--bad)}
+  .loc{color:var(--mute);margin-bottom:10px;min-height:22px}
+  .msg{color:var(--warn);font-size:13px;margin-bottom:8px}
+  .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 18px;max-width:420px}
+  .k{color:var(--mute);font-size:12px;text-transform:uppercase;letter-spacing:.6px}
+  .v{font-weight:600;font-variant-numeric:tabular-nums;word-break:break-all}
+  .link{background:none;border:0;color:var(--blue);cursor:pointer;padding:0;font-size:12px;margin-left:6px}
+
+  /* checklist */
+  .steps{list-style:none;padding:0;margin:0;display:grid;gap:8px}
+  .steps li{display:flex;gap:10px;align-items:center;color:var(--mute)}
+  .steps li.done{color:var(--text)}
+  .dot{width:22px;height:22px;border-radius:50%;border:2px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:12px;flex:none}
+  .done .dot{background:var(--accent);border-color:var(--accent);color:#06241a}
+
+  /* forms */
+  label{display:block;font-size:13px;color:var(--mute);margin:10px 0 4px}
+  input[type=text],input[type=password],input[type=search]{width:100%;padding:10px 12px;background:var(--panel2);border:1px solid var(--line);
+    border-radius:8px;color:var(--text);font-size:15px}
+  input:focus{outline:2px solid var(--accent-d);border-color:transparent}
+  button.btn{background:var(--accent);color:#06241a;border:0;border-radius:8px;padding:9px 16px;font-weight:700;cursor:pointer;font-size:14px}
+  button.btn:hover{filter:brightness(1.08)}
+  button.btn.sec{background:var(--panel2);color:var(--text);border:1px solid var(--line)}
+  button.btn.danger{background:#4a2020;color:#ffb3b3;border:1px solid #7a2c2c}
+  button.btn:disabled{opacity:.5;cursor:not-allowed}
+  .ubar{height:10px;border-radius:5px;background:var(--panel2);border:1px solid var(--line);overflow:hidden}
+  .ubar i{display:block;height:100%;width:0;background:var(--accent);border-radius:5px;transition:width .6s ease}
+  #updNotes{white-space:pre-wrap;font:inherit;font-size:13px;margin:6px 0 0}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:700px){.two{grid-template-columns:1fr}}
+  .hint{color:var(--mute);font-size:13px;margin:6px 0 0}
+  .ok{color:var(--accent);font-size:13px}
+  .err{color:var(--bad);font-size:13px}
+  .bad-t{color:var(--bad)}
+
+  .drop{border:2px dashed var(--line);border-radius:10px;padding:18px;text-align:center;color:var(--mute);cursor:pointer}
+  .drop.over{border-color:var(--accent);color:var(--text)}
+
+  /* locations */
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .seg button{background:var(--panel2);color:var(--mute);border:0;padding:7px 14px;cursor:pointer;font-weight:600}
+  .seg button.on{background:var(--accent);color:#06241a}
+  details.country{border-top:1px solid var(--line)}
+  details.country summary{cursor:pointer;padding:10px 4px;font-weight:600;list-style:none;display:flex;justify-content:space-between}
+  details.country summary::-webkit-details-marker{display:none}
+  details.country summary span{color:var(--mute);font-weight:400}
+  .lrow{display:flex;justify-content:space-between;align-items:center;padding:7px 10px;border-radius:8px}
+  .lrow:hover{background:var(--panel2)}
+  .lrow.cur{background:rgba(61,220,151,.12)}
+  .tag{font-size:11px;color:var(--mute);border:1px solid var(--line);border-radius:5px;padding:0 5px;margin-left:6px}
+  .empty{color:var(--mute);padding:14px 0}
+
+  /* toggles */
+  .toggle{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;padding:10px 0;border-top:1px solid var(--line)}
+  .toggle:first-of-type{border-top:0}
+  .toggle .t{font-weight:600}
+  .switch{position:relative;width:46px;height:26px;flex:none}
+  .switch input{opacity:0;width:0;height:0}
+  .switch span{position:absolute;inset:0;background:var(--line);border-radius:26px;cursor:pointer;transition:.2s}
+  .switch span:before{content:"";position:absolute;width:20px;height:20px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.2s}
+  .switch input:checked+span{background:var(--accent-d)}
+  .switch input:checked+span:before{transform:translateX(20px)}
+  pre{background:#0a0d11;border:1px solid var(--line);border-radius:8px;padding:10px;max-height:300px;overflow:auto;font-size:12px;margin:10px 0 0;white-space:pre-wrap}
+  details.plain summary{cursor:pointer;font-weight:600}
+
+  /* self-test */
+  .tres{display:grid;gap:8px;margin-top:14px}
+  .tr{display:flex;gap:10px;align-items:flex-start;padding:9px 12px;border-radius:9px;background:var(--panel2);border:1px solid var(--line)}
+  .ti{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;flex:none;margin-top:1px}
+  .tr.pass .ti{background:var(--accent);color:#06241a}
+  .tr.warn .ti{background:var(--warn);color:#2b1f00}
+  .tr.fail .ti{background:var(--bad);color:#2b0000}
+  .tr.skip .ti{background:var(--line);color:var(--mute)}
+  .tr .tn{font-weight:600}
+  .tr .td{color:var(--mute);font-size:13px}
+  .tr .tf{font-size:13px;color:var(--warn);margin-top:2px}
+  .tr.fail .tf{color:#ffb3b3}
+  .sum{margin-top:14px;padding:10px 14px;border-radius:9px;font-weight:600}
+  .sum.pass{background:rgba(61,220,151,.12);color:var(--accent)}
+  .sum.warn{background:#3a2e12;color:#ffd98a}
+  .sum.fail{background:#3a1717;color:#ffb3b3}
+  .spin{display:inline-block;width:14px;height:14px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:sp .8s linear infinite;vertical-align:-2px;margin-right:6px}
+  @keyframes sp{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <header>
+    <h1>Barrier</h1>
+    <div class="sub">Runs ExpressVPN's OpenVPN locations on your NAS</div>
+  </header>
+
+  <div id="banners"></div>
+
+  <div class="card" id="hero">
+    <div class="hero">
+      <button class="power" id="power" title="Connect / disconnect">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v9"/><path d="M6.3 6.7a8 8 0 1 0 11.4 0"/></svg>
+        <span id="powerLabel">Connect</span>
+      </button>
+      <div class="info">
+        <div class="state" id="stateText">Not connected</div>
+        <div class="loc" id="locText"></div>
+        <div class="msg" id="msgText"></div>
+        <div class="grid">
+          <div><div class="k">Public IP <button class="link" id="ipBtn">refresh</button></div><div class="v" id="ipText">–</div></div>
+          <div><div class="k">Connected for</div><div class="v" id="upText">–</div></div>
+          <div><div class="k">Download</div><div class="v" id="rxText">–</div></div>
+          <div><div class="k">Upload</div><div class="v" id="txText">–</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="setup">
+    <h2>Getting started</h2>
+    <ul class="steps">
+      <li id="st1"><span class="dot">1</span>Enter your ExpressVPN manual-config username and password</li>
+      <li id="st2"><span class="dot">2</span>Add the location files you downloaded (.ovpn)</li>
+      <li id="st3"><span class="dot">3</span>Pick a location below and connect</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between;margin-bottom:10px">
+      <h2 style="margin:0">Locations</h2>
+      <div class="row">
+        <button class="btn sec" id="randomBtn">Random</button>
+        <div class="seg" id="protoSeg" title="UDP is faster. Use TCP if UDP is blocked.">
+          <button data-p="udp">UDP</button><button data-p="tcp">TCP</button>
+        </div>
+      </div>
+    </div>
+    <input type="search" id="search" placeholder="Search country or city…">
+    <div id="locList"></div>
+  </div>
+
+  <div class="two">
+    <div class="card">
+      <h2>ExpressVPN account</h2>
+      <p class="hint" style="margin-top:0">Use the <b>OpenVPN username and password</b> from your ExpressVPN account's <i>Manual Config</i> page. These are not your email and login password.</p>
+      <label for="user">Username</label>
+      <input type="text" id="user" autocomplete="off">
+      <label for="pass">Password</label>
+      <input type="password" id="pass" autocomplete="new-password" placeholder="••••••••">
+      <div class="row" style="margin-top:12px"><button class="btn" id="saveCred">Save</button><span id="credMsg"></span></div>
+    </div>
+
+    <div class="card">
+      <h2>Add locations</h2>
+      <div class="drop" id="drop">Drop <b>.ovpn</b> files (or a .zip of them) here<br>or click to choose</div>
+      <input type="file" id="file" accept=".ovpn,.zip" multiple hidden>
+      <div id="upMsg" class="hint"></div>
+      <div class="row" style="margin-top:10px"><button class="btn danger" id="clearBtn">Remove all locations</button></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Settings</h2>
+    <div class="toggle">
+      <div><div class="t">Kill switch</div><div class="hint">If the VPN drops, block internet for this container and anything attached to it. Your home network (LAN) keeps working.</div></div>
+      <label class="switch"><input type="checkbox" id="ks"><span></span></label>
+    </div>
+    <div class="toggle">
+      <div><div class="t">Connect automatically</div><div class="hint">Reconnect to the last location whenever the container starts (for example after a NAS reboot).</div></div>
+      <label class="switch"><input type="checkbox" id="auto"><span></span></label>
+    </div>
+    <div style="border-top:1px solid var(--line);padding-top:10px">
+      <div class="t" style="font-weight:600">Home network ranges</div>
+      <div class="hint">Traffic to these addresses skips the VPN so you can still reach this page and your other devices. The defaults cover almost every home.</div>
+      <div class="row" style="margin-top:8px"><input type="text" id="lan" style="flex:1;min-width:220px"><button class="btn sec" id="saveLan">Save</button><span id="lanMsg"></span></div>
+      <div class="hint">Changes apply the next time you connect.</div>
+    </div>
+    <div style="border-top:1px solid var(--line);padding-top:10px;margin-top:10px">
+      <div class="t" style="font-weight:600">Page password</div>
+      <div class="hint" id="pwHint">Your browser asks for it before showing this page (any username works). Leave it empty and save to remove it.</div>
+      <div class="row" style="margin-top:8px"><input type="password" id="pagePw" autocomplete="new-password" placeholder="New password" style="flex:1;min-width:220px"><button class="btn sec" id="savePw">Save</button><span id="pwMsg"></span></div>
+    </div>
+  </div>
+
+  <div class="card" id="updCard">
+    <h2>Updates</h2>
+    <div class="row"><span id="updState" style="flex:1">Version –</span><button class="btn" id="updNow" style="display:none">Update now</button><button class="btn sec" id="updCheck">Check now</button></div>
+    <div id="updBarWrap" style="display:none;margin-top:10px"><div class="ubar"><i id="updBar"></i></div><div class="hint" id="updStep"></div></div>
+    <div class="hint" id="updLast"></div>
+    <details class="plain" id="updNotesWrap" style="display:none"><summary>What's new</summary><pre id="updNotes"></pre></details>
+    <div class="toggle" style="margin-top:10px">
+      <div><div class="t">Install updates automatically</div><div class="hint">Checks GitHub every 6 hours and installs new versions by itself. Only Barrier's app restarts, for a few seconds; the kill switch stays on the whole time, and it reconnects to the same location afterwards.</div></div>
+      <label class="switch"><input type="checkbox" id="autoUpd"><span></span></label>
+    </div>
+  </div>
+
+  <div class="card" id="testCard">
+    <h2>Self-test</h2>
+    <p class="hint" style="margin-top:0">Checks that everything is set up right and that your real IP isn't leaking. Run <b>Check setup</b> any time. Connect to a location first for the full leak tests.</p>
+    <div class="row">
+      <button class="btn" id="testBtn">Check setup</button>
+      <button class="btn sec" id="deepBtn" title="Cuts the VPN on purpose to prove the kill switch blocks traffic, then checks it reconnects by itself">Test kill switch (drops the VPN ~30 s)</button>
+      <button class="btn sec" id="copyBtn" style="display:none">Copy report</button>
+    </div>
+    <div id="testStep" class="hint"></div>
+    <div id="testSum"></div>
+    <div class="tres" id="testRes"></div>
+  </div>
+
+  <div class="card">
+    <details class="plain" id="logWrap"><summary>Connection log</summary><pre id="logBox">–</pre></details>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+async function api(path, method = 'GET', body) {
+  const opt = {method, headers: {'X-Requested-With': 'barrier'}};
+  if (body instanceof FormData) opt.body = body;
+  else if (body !== undefined) { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
+  const r = await fetch(path, opt);
+  let j = {};
+  try { j = await r.json(); } catch (e) {}
+  if (!r.ok) throw new Error(j.error || ('Request failed (' + r.status + ')'));
+  return j;
+}
+
+const fmtBytes = n => { if (n < 1024) return n + ' B'; const u = ['KB','MB','GB','TB']; let i = -1; do { n /= 1024; i++; } while (n >= 1024 && i < 3); return n.toFixed(n < 10 ? 2 : 1) + ' ' + u[i]; };
+const fmtTime = s => { const h = Math.floor(s/3600), m = Math.floor(s%3600/60), x = s%60; return (h ? h + 'h ' : '') + (h || m ? m + 'm ' : '') + x + 's'; };
+
+let status = {}, prev = null, protocol = 'udp', locations = [], lastKey = '', busy = false;
+
+const STATE_TEXT = {connected:'Connected', connecting:'Connecting…', reconnecting:'Reconnecting…', disconnected:'Not connected',
+                    auth_failed:'Login rejected', error:'Problem'};
+
+function renderStatus(s) {
+  status = s;
+  $('hero').className = 'card s-' + s.state;
+  $('stateText').textContent = STATE_TEXT[s.state] || s.state;
+  $('locText').textContent = s.state === 'disconnected'
+      ? (s.kill_switch ? 'Kill switch is on: internet is blocked for linked apps' : 'Your real IP is exposed')
+      : s.location;
+  $('msgText').textContent = s.message || '';
+  $('ipText').textContent = s.ip || (s.state === 'connected' ? 'looking up…' : '–');
+  $('upText').textContent = s.state === 'connected' ? fmtTime(s.uptime) : '–';
+  const now = Date.now();
+  if (s.state === 'connected' && prev && prev.state === 'connected' && now > prev.t) {
+    const dt = (now - prev.t) / 1000;
+    $('rxText').textContent = fmtBytes(Math.max(0, (s.rx - prev.rx) / dt)) + '/s';
+    $('txText').textContent = fmtBytes(Math.max(0, (s.tx - prev.tx) / dt)) + '/s';
+  } else if (s.state !== 'connected') { $('rxText').textContent = '–'; $('txText').textContent = '–'; }
+  prev = {state: s.state, rx: s.rx, tx: s.tx, t: now};
+
+  const pb = $('power'), pl = $('powerLabel');
+  pb.disabled = false;
+  if (s.state === 'connected') pl.textContent = 'Disconnect';
+  else if (s.state === 'connecting' || s.state === 'reconnecting') pl.textContent = 'Cancel';
+  else if (s.last_location && s.has_credentials) pl.textContent = 'Connect';
+  else { pl.textContent = 'Connect'; pb.disabled = !(s.has_credentials && s.location_count); }
+
+  $('ks').checked = s.kill_switch; $('auto').checked = s.auto_connect;
+  $('st1').classList.toggle('done', s.has_credentials);
+  $('st2').classList.toggle('done', s.location_count > 0);
+  $('st3').classList.toggle('done', s.state === 'connected');
+  $('setup').style.display = (s.has_credentials && s.location_count && s.state === 'connected') ? 'none' : '';
+
+  let b = '';
+  if (!s.firewall_ok) b += '<div class="banner bad"><b>Kill switch unavailable.</b> This NAS does not allow the container to change its firewall rules, so if the VPN drops, traffic could leave unprotected. The VPN itself still works.</div>';
+  if (s.state === 'auth_failed') b += '<div class="banner bad">ExpressVPN did not accept the username/password. Copy them again from the Manual Config page and save below.</div>';
+  $('banners').innerHTML = b;
+  if (lastKey !== s.location) { lastKey = s.location; renderLocations(); }
+}
+
+async function poll() {
+  try { renderStatus(await api('/api/status')); } catch (e) { $('stateText').textContent = 'Can’t reach the app'; }
+  setTimeout(poll, 2000);
+}
+
+$('power').onclick = async () => {
+  if (busy) return; busy = true;
+  try {
+    if (status.state === 'disconnected' || status.state === 'auth_failed' || status.state === 'error') {
+      if (status.last_location) await api('/api/connect', 'POST', {last: true});
+      else $('locList').scrollIntoView({behavior: 'smooth'});
+    } else await api('/api/disconnect', 'POST', {});
+    renderStatus(await api('/api/status'));
+  } catch (e) { $('msgText').textContent = e.message; }
+  busy = false;
+};
+$('ipBtn').onclick = async () => { await api('/api/ip', 'POST', {}); $('ipText').textContent = 'looking up…'; };
+$('randomBtn').onclick = async () => {
+  try { await api('/api/connect', 'POST', {random: true, protocol}); } catch (e) { $('msgText').textContent = e.message; }
+};
+
+// ---- locations
+async function loadLocations() {
+  const d = await api('/api/locations');
+  locations = d.locations; protocol = d.protocol; renderProto(); renderLocations();
+}
+function renderProto() { document.querySelectorAll('#protoSeg button').forEach(b => b.classList.toggle('on', b.dataset.p === protocol)); }
+document.querySelectorAll('#protoSeg button').forEach(b => b.onclick = async () => {
+  protocol = b.dataset.p; renderProto(); await api('/api/settings', 'POST', {protocol}); renderLocations();
+});
+function renderLocations() {
+  const q = $('search').value.trim().toLowerCase();
+  const box = $('locList');
+  if (!locations.length) { box.innerHTML = '<div class="empty">No locations yet. Add your .ovpn files in “Add locations” below.</div>'; return; }
+  const by = {};
+  locations.filter(l => !q || l.name.toLowerCase().includes(q)).forEach(l => (by[l.country] = by[l.country] || []).push(l));
+  const open = q ? ' open' : '';
+  let h = '';
+  Object.keys(by).forEach(c => {
+    h += '<details class="country"' + open + '><summary>' + esc(c) + '<span>' + by[c].length + '</span></summary>';
+    by[c].forEach(l => {
+      const cur = status.location && status.location === l.name;
+      const label = l.name.includes(' - ') ? l.name.split(' - ').slice(1).join(' - ') : l.name;
+      const tags = l.protocols.map(p => '<span class="tag">' + p.toUpperCase() + '</span>').join('');
+      h += '<div class="lrow' + (cur ? ' cur' : '') + '"><div>' + esc(label) + tags + '</div>' +
+           '<button class="btn' + (cur ? ' sec' : '') + '" data-k="' + esc(l.key) + '">' + (cur ? 'Connected' : 'Connect') + '</button></div>';
+    });
+    h += '</details>';
+  });
+  box.innerHTML = h || '<div class="empty">Nothing matches “' + esc(q) + '”.</div>';
+  box.querySelectorAll('button[data-k]').forEach(b => b.onclick = async () => {
+    try { await api('/api/connect', 'POST', {key: b.dataset.k, protocol}); renderStatus(await api('/api/status')); window.scrollTo({top: 0, behavior: 'smooth'}); }
+    catch (e) { $('msgText').textContent = e.message; window.scrollTo({top: 0, behavior: 'smooth'}); }
+  });
+}
+$('search').oninput = renderLocations;
+
+// ---- credentials
+async function loadCreds() { const d = await api('/api/credentials'); if (d.has) { $('user').value = d.username; $('pass').placeholder = '(saved, leave blank to keep)'; } }
+$('saveCred').onclick = async () => {
+  const m = $('credMsg'); m.className = ''; m.textContent = '';
+  try {
+    const u = $('user').value.trim(), p = $('pass').value.trim();
+    if (!p && status.has_credentials) { m.className = 'ok'; m.textContent = 'Nothing changed'; return; }
+    await api('/api/credentials', 'POST', {username: u, password: p});
+    $('pass').value = ''; $('pass').placeholder = '(saved, leave blank to keep)';
+    m.className = 'ok'; m.textContent = 'Saved ✓';
+  } catch (e) { m.className = 'err'; m.textContent = e.message; }
+};
+
+// ---- upload
+const drop = $('drop'), fileIn = $('file');
+drop.onclick = () => fileIn.click();
+['dragover','dragenter'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', e => upload(e.dataTransfer.files));
+fileIn.onchange = () => upload(fileIn.files);
+async function upload(files) {
+  if (!files.length) return;
+  const fd = new FormData(); [...files].forEach(f => fd.append('files', f));
+  $('upMsg').className = 'hint'; $('upMsg').textContent = 'Uploading…';
+  try {
+    const r = await api('/api/upload', 'POST', fd);
+    $('upMsg').className = r.saved ? 'ok' : 'err';
+    $('upMsg').textContent = 'Added ' + r.saved + ' file(s). ' + r.total + ' location(s) total.' + (r.skipped.length ? ' Skipped: ' + r.skipped.join(', ') : '');
+    await loadLocations();
+  } catch (e) { $('upMsg').className = 'err'; $('upMsg').textContent = e.message; }
+  fileIn.value = '';
+}
+$('clearBtn').onclick = async () => {
+  if (!confirm('Remove all location files? (Your username/password stay saved.)')) return;
+  try { await api('/api/configs/clear', 'POST', {}); await loadLocations(); $('upMsg').textContent = ''; }
+  catch (e) { $('upMsg').className = 'err'; $('upMsg').textContent = e.message; }
+};
+
+// ---- settings
+$('ks').onchange = () => api('/api/settings', 'POST', {kill_switch: $('ks').checked});
+$('auto').onchange = () => api('/api/settings', 'POST', {auto_connect: $('auto').checked});
+async function loadSettings() { const s = await api('/api/settings'); $('lan').value = s.lan_subnets.join(', '); }
+$('saveLan').onclick = async () => {
+  const m = $('lanMsg'); m.className = '';
+  try { const s = await api('/api/settings', 'POST', {lan_subnets: $('lan').value}); $('lan').value = s.lan_subnets.join(', '); m.className = 'ok'; m.textContent = 'Saved ✓'; }
+  catch (e) { m.className = 'err'; m.textContent = e.message; }
+};
+
+
+// ---- self-test
+const ICON = {pass: '✓', warn: '!', fail: '✕', skip: '–'};
+let lastTest = null, testTimer = null;
+function renderTest(t) {
+  lastTest = t;
+  $('testStep').innerHTML = t.running ? '<span class="spin"></span>' + esc(t.step || 'Working…') : '';
+  $('testBtn').disabled = t.running; $('deepBtn').disabled = t.running;
+  $('copyBtn').style.display = (t.results.length && !t.running) ? '' : 'none';
+  $('testRes').innerHTML = t.results.map(r =>
+    '<div class="tr ' + r.status + '"><div class="ti">' + ICON[r.status] + '</div><div><div class="tn">' + esc(r.name) +
+    '</div><div class="td">' + esc(r.detail) + '</div>' + (r.fix && r.status !== 'pass' ? '<div class="tf">What to do: ' + esc(r.fix) + '</div>' : '') + '</div></div>').join('');
+  if (t.results.length && !t.running) {
+    const n = s => t.results.filter(r => r.status === s).length;
+    const f = n('fail'), w = n('warn');
+    $('testSum').innerHTML = f ? '<div class="sum fail">' + f + ' problem(s) found. See the red items below.</div>'
+      : w ? '<div class="sum warn">Working, with ' + w + ' thing(s) worth a look.</div>'
+      : '<div class="sum pass">All good. Everything checked out.</div>';
+  } else $('testSum').innerHTML = '';
+}
+async function pollTest() {
+  try {
+    const t = await api('/api/selftest'); renderTest(t);
+    if (t.running) testTimer = setTimeout(pollTest, 1000);
+  } catch (e) { testTimer = setTimeout(pollTest, 2000); }
+}
+async function startTest(deep) {
+  if (deep && !confirm('This cuts the VPN on purpose for about half a minute. Apps attached to it will lose internet briefly, then it reconnects by itself. Continue?')) return;
+  $('testSum').innerHTML = '';
+  try { await api('/api/selftest', 'POST', {deep}); clearTimeout(testTimer); pollTest(); }
+  catch (e) { $('testStep').textContent = e.message; }
+}
+$('testBtn').onclick = () => startTest(false);
+$('deepBtn').onclick = () => startTest(true);
+$('copyBtn').onclick = async () => {
+  const lines = ['Barrier self-test'].concat(lastTest.results.map(r => '[' + r.status.toUpperCase() + '] ' + r.name + ': ' + r.detail + (r.fix && r.status !== 'pass' ? ' -> ' + r.fix : '')));
+  try { await navigator.clipboard.writeText(lines.join('\n')); $('copyBtn').textContent = 'Copied ✓'; }
+  catch (e) { prompt('Copy this report:', lines.join('\n')); }
+  setTimeout(() => $('copyBtn').textContent = 'Copy report', 2000);
+};
+
+// ---- logs
+async function refreshLog() {
+  if ($('logWrap').open) { const d = await api('/api/logs'); const el = $('logBox'); const atEnd = el.scrollTop + el.clientHeight >= el.scrollHeight - 20; el.textContent = d.lines.join('\n') || '(empty)'; if (atEnd) el.scrollTop = el.scrollHeight; }
+  setTimeout(refreshLog, 2500);
+}
+
+
+// ---- Updates ----
+let updVersion = '';
+const mb = n => (n / 1048576).toFixed(1);
+function renderUpdate(u) {
+  // Came back on a new version after an update: reload so the page matches.
+  if (updVersion && u.current && u.current !== updVersion) { location.reload(); return; }
+  updVersion = u.current;
+  let t = 'Version ' + esc(u.current);
+  if (u.checking) t += ' · checking…';
+  else if (u.available) t += ' · <b>' + esc(u.latest) + ' is available</b>';
+  else if (u.error) t += ' · <span class="bad-t">' + esc(u.error) + '</span>';
+  else if (u.checked_at) t += ' · up to date';
+  $('updState').innerHTML = t;
+  const p = u.progress, busy = !!(p && p.phase !== 'failed');
+  $('updNow').style.display = u.available && u.can_install && !busy ? '' : 'none';
+  $('updCheck').disabled = !!u.checking || busy;
+  $('updBarWrap').style.display = p ? '' : 'none';
+  if (p) {
+    let f = 0, step = '';
+    if (p.phase === 'download') { f = p.total ? 0.05 + 0.75 * Math.min(1, p.done / p.total) : 0.2; step = 'Downloading ' + esc(u.latest) + (p.total ? ' · ' + mb(p.done) + ' of ' + mb(p.total) + ' MB' : ''); }
+    else if (p.phase === 'verify') { f = 0.85; step = 'Checking the download…'; }
+    else if (p.phase === 'restart') { f = 0.95; step = 'Restarting Barrier on ' + esc(u.latest) + '. This page reloads by itself.'; }
+    else step = '<span class="bad-t">Update failed: ' + esc(p.message) + '</span>';
+    $('updBar').style.width = (f * 100).toFixed(0) + '%';
+    $('updStep').innerHTML = step;
+  }
+  const r = u.last_result;
+  $('updLast').innerHTML = r && r.time ? (r.ok ? 'Last update: ' + esc(r.message) : '<span class="bad-t">Last update didn\'t work: ' + esc(r.message) + '</span>') + ' · ' + new Date(r.time * 1000).toLocaleString() : '';
+  if (!u.can_install && u.available) $('updLast').innerHTML += '<br>Install the newest Barrier .spk from GitHub to update this copy.';
+  $('updNotesWrap').style.display = u.available && u.notes ? '' : 'none';
+  $('updNotes').textContent = u.notes || '';
+  if (document.activeElement !== $('autoUpd')) $('autoUpd').checked = !!u.auto_update;
+}
+async function pollUpdate() {
+  try { renderUpdate(await api('/api/update')); } catch (e) {}
+  setTimeout(pollUpdate, 3000);
+}
+$('updCheck').onclick = async () => { try { renderUpdate(await api('/api/update/check', 'POST')); } catch (e) { alert(e.message); } };
+$('updNow').onclick = async () => { try { renderUpdate(await api('/api/update/install', 'POST')); } catch (e) { alert(e.message); } };
+$('savePw').onclick = async () => {
+  const pw = $('pagePw').value;
+  if (!pw && !confirm('Remove the page password? Anyone on your home network could then open this page.')) return;
+  try {
+    await api('/api/password', 'POST', {password: pw});
+    $('pagePw').value = '';
+    $('pwMsg').textContent = pw ? 'Saved. Your browser will ask for the new password.' : 'Removed.';
+    if (pw) setTimeout(() => location.reload(), 1500);
+  } catch (e) { $('pwMsg').innerHTML = '<span class="bad-t">' + esc(e.message) + '</span>'; }
+};
+$('autoUpd').onchange = () => api('/api/settings', 'POST', {auto_update: $('autoUpd').checked});
+
+(async () => { await loadSettings(); await loadCreds(); await loadLocations(); poll(); refreshLog(); pollTest(); pollUpdate(); })();
+</script>
+</body>
+</html>

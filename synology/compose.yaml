@@ -1,0 +1,29 @@
+# Barrier, created by its Package Center package. Container Manager shows it as
+# the project "barrier". Lifestream (and any app you attach) joins this
+# container's network, so its traffic only leaves through the VPN.
+services:
+  barrier:
+    # Comes inside the package (image.tar.gz); nothing is downloaded or built.
+    image: barrier-package:@VERSION@
+    pull_policy: never
+    container_name: barrier
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN    # the tunnel and the kill switch
+      - SYS_MODULE   # switch on the NAS's tun module, so no boot task is needed
+    ports:
+      - "8085:8085"  # Barrier's page
+      - "9091:9091"  # Lifestream's page and remote control (it lives in this network)
+    volumes:
+      # Login, locations, settings and downloaded updates. Kept when the package is updated.
+      - /var/packages/Barrier/var:/config
+      - /lib/modules:/lib/modules:ro
+      # Read once on the first start, to bring over the old project's settings.
+      - /volume1/docker:/old:ro
+      - /etc/localtime:/etc/localtime:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8085/api/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

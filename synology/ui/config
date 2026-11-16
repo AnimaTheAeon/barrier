@@ -1,0 +1,14 @@
+{
+	".url": {
+		"Barrier.Web": {
+			"type": "url",
+			"allUsers": false,
+			"title": "Barrier",
+			"desc": "ExpressVPN for the NAS",
+			"icon": "images/barrier_{0}.png",
+			"protocol": "http",
+			"port": "8085",
+			"url": "/"
+		}
+	}
+}

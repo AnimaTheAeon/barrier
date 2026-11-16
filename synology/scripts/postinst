@@ -1,0 +1,11 @@
+#!/bin/sh
+mkdir -p "$SYNOPKG_PKGVAR"
+{
+cat << 'NOTE'
+<p style="font-weight:bold;">Barrier is installed</p>
+<p>Open <b>Barrier</b> from the main menu (or port <b>8085</b> on this NAS). If you used Barrier before as a Container Manager project in <b>docker/barrier</b>, your login, locations and page password were brought over.</p>
+<p>No Task Scheduler task is needed: Barrier switches the VPN's tunnel device on by itself. You can delete the old "Enable TUN" boot task.</p>
+<p><b>Lifestream:</b> it runs inside Barrier, so after installing a Barrier package by hand, install the Lifestream .spk again (Package Center → Manual Install; the same file is fine) so it joins the new Barrier. Updates from inside Barrier don't need this.</p>
+NOTE
+} >> "$SYNOPKG_TEMP_LOGFILE"
+exit 0
