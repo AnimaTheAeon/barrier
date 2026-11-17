@@ -225,7 +225,7 @@
     <div class="hint" id="updLast"></div>
     <details class="plain" id="updNotesWrap" style="display:none"><summary>What's new</summary><pre id="updNotes"></pre></details>
     <div class="toggle" style="margin-top:10px">
-      <div><div class="t">Install updates automatically</div><div class="hint">Checks GitHub every 6 hours and installs new versions by itself. Only Barrier's app restarts, for a few seconds; the kill switch stays on the whole time, and it reconnects to the same location afterwards.</div></div>
+      <div><div class="t">Install updates automatically</div><div class="hint">Checks for new versions every 6 hours and installs them by itself. Only Barrier's app restarts, for a few seconds; the kill switch stays on the whole time, and it reconnects to the same location afterwards.</div></div>
       <label class="switch"><input type="checkbox" id="autoUpd"><span></span></label>
     </div>
   </div>
@@ -490,7 +490,7 @@ function renderUpdate(u) {
   }
   const r = u.last_result;
   $('updLast').innerHTML = r && r.time ? (r.ok ? 'Last update: ' + esc(r.message) : '<span class="bad-t">Last update didn\'t work: ' + esc(r.message) + '</span>') + ' · ' + new Date(r.time * 1000).toLocaleString() : '';
-  if (!u.can_install && u.available) $('updLast').innerHTML += '<br>Install the newest Barrier .spk from GitHub to update this copy.';
+  if (!u.can_install && u.available) $('updLast').innerHTML += '<br>Install the newest Barrier package in Package Center to update this copy.';
   $('updNotesWrap').style.display = u.available && u.notes ? '' : 'none';
   $('updNotes').textContent = u.notes || '';
   if (document.activeElement !== $('autoUpd')) $('autoUpd').checked = !!u.auto_update;

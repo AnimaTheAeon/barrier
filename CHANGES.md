@@ -2,6 +2,11 @@
 
 Each version's "- " lines become its release notes.
 
+## 1.1.1
+
+- Update messages say "update server" and never include a web address
+- Package Center no longer shows developer or support links; the developer is shown as Barrier
+
 ## 1.1.0
 
 - Barrier is now a Synology package: install the .spk in Package Center. No more copying folders or building in Container Manager

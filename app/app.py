@@ -20,6 +20,7 @@ import sys
 import tarfile
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
@@ -1149,6 +1150,17 @@ def is_newer(a, b):
     return _vtuple(a) > _vtuple(b)
 
 
+
+def plain_update_error(e):
+    """A short message for a failed check or download that never names the server."""
+    if isinstance(e, ValueError):
+        return str(e)
+    if isinstance(e, urllib.error.HTTPError):
+        return "the update server answered with an error (HTTP %d). Try again later." % e.code
+    if isinstance(e, (TimeoutError, socket.timeout)):
+        return "the update server took too long to answer. Try again later."
+    return "couldn't reach the update server. Check the internet connection and try again."
+
 class Updater:
     def __init__(self):
         self.lock = threading.Lock()
@@ -1191,13 +1203,13 @@ class Updater:
             version = str(j.get("tag_name", "")).lstrip("v")
             asset = next((a for a in j.get("assets", []) if re.fullmatch(r"barrier-app-[\w.]+\.tar\.gz", a.get("name", ""))), None)
             if not version or not asset:
-                raise ValueError("GitHub's newest release has no Barrier app download")
+                raise ValueError("The newest release has no Barrier app download")
             digest = str(asset.get("digest") or "")
             self.latest = {"version": version, "notes": j.get("body") or "", "url": asset.get("browser_download_url", ""),
                            "sha256": digest[7:].lower() if digest.startswith("sha256:") else "", "size": int(asset.get("size") or 0)}
             self.error = ""
-        except Exception as e:  # network down, VPN disconnected with the kill switch on, GitHub busy
-            self.error = "Couldn't check GitHub: %s" % (getattr(e, "reason", None) or e)
+        except Exception as e:  # network down, VPN disconnected with the kill switch on, server busy
+            self.error = "Couldn't check for updates: " + plain_update_error(e)
         finally:
             self.checked_at = int(time.time())
             self.checking = False
@@ -1230,7 +1242,7 @@ class Updater:
             shutil.rmtree(work, ignore_errors=True)
             os.makedirs(work)
             if not rel["sha256"]:
-                raise ValueError("GitHub didn't give a checksum for the download, so it wasn't installed.")
+                raise ValueError("The update server didn't give a checksum for the download, so it wasn't installed.")
             tgz = os.path.join(work, "app.tar.gz")
             h = hashlib.sha256()
             req = urllib.request.Request(rel["url"], headers={"User-Agent": "Barrier/" + VERSION})
@@ -1246,7 +1258,7 @@ class Updater:
                     self.progress = {"phase": "download", "done": done, "total": rel["size"], "message": ""}
             self.progress = {"phase": "verify", "done": 1, "total": 1, "message": ""}
             if h.hexdigest() != rel["sha256"]:
-                raise ValueError("The download didn't match GitHub's checksum. Nothing was changed.")
+                raise ValueError("The download didn't match its checksum. Nothing was changed.")
             staged = os.path.join(work, "staged")
             os.makedirs(staged)
             with tarfile.open(tgz) as t:
@@ -1265,7 +1277,7 @@ class Updater:
             except OSError:
                 got = ""
             if got != rel["version"] or not os.path.isfile(os.path.join(root, "app.py")):
-                raise ValueError("The download isn't the version GitHub listed. Nothing was changed.")
+                raise ValueError("The download isn't the version that was offered. Nothing was changed.")
             compile(open(os.path.join(root, "app.py")).read(), "app.py", "exec")
             nxt = os.path.join(UPDATE_DIR, "next")
             shutil.rmtree(nxt, ignore_errors=True)
@@ -1276,9 +1288,11 @@ class Updater:
             time.sleep(2)  # let the page show "Restarting"
             restart_for_update()
         except Exception as e:
-            self._write_result(False, rel["version"], str(e))
-            self.progress = {"phase": "failed", "done": 0, "total": 0, "message": str(e)}
-            VPN._log("Update failed: %s" % e)
+            msg = plain_update_error(e)
+            msg = msg[0].upper() + msg[1:]
+            self._write_result(False, rel["version"], msg)
+            self.progress = {"phase": "failed", "done": 0, "total": 0, "message": msg}
+            VPN._log("Update failed: %s" % msg)
             with self.lock:
                 self.installing = False
         finally:
