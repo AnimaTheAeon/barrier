@@ -2,6 +2,10 @@
 
 Each version's "- " lines become its release notes.
 
+## 1.1.2
+
+- A copy that can't install updates by itself now says how to turn updates on, instead of asking for a package install.
+
 ## 1.1.1
 
 - Update messages say "update server" and never include a web address

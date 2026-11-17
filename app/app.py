@@ -1225,7 +1225,7 @@ class Updater:
 
     def start_install(self):
         if not UPDATE_DIR:
-            return "This copy of Barrier wasn't started by its package, so it can't update itself. Install the newest .spk instead."
+            return "This copy of Barrier wasn't started by its package, so it can't install updates by itself. Reinstall Barrier from its Synology package once to turn updates on."
         if not self.available():
             return "There's no newer version to install."
         with self.lock:
