@@ -2,6 +2,11 @@
 
 Each version's "- " lines become its release notes.
 
+## 1.1.4
+
+- Fixes the package version not starting: DSM ran it without the rights it needs to build the VPN tunnel and save its settings, so it restarted over and over. It now runs with them
+- Brings over the page password from the old Container Manager setup even if the first try failed
+
 ## 1.1.3
 
 - If the VPN says it's connected but nothing gets through it (not even name lookups) for 3 minutes, Barrier reconnects by itself. Before, a dead tunnel could sit "connected" for hours and leave Lifestream stuck on "Getting info"

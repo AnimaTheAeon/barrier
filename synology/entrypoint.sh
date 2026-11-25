@@ -11,6 +11,10 @@ CONF=${CONFIG_DIR:-/config}
 OLDROOT=${BARRIER_OLD_DIR:-/old}
 UPD=${BARRIER_UPDATE_DIR:-$CONF/app-update}
 export BARRIER_UPDATE_DIR="$UPD"
+echo "Running as $(id -un 2>/dev/null || id -u) (uid $(id -u))"
+if [ "$(id -u)" != 0 ]; then
+	echo "Barrier needs to run as root to build the VPN tunnel and the kill switch; it's running as uid $(id -u). Reinstall the Barrier package."
+fi
 mkdir -p "$CONF" "$UPD"
 
 # 1. The tunnel device. Synology doesn't load its tun module until something
@@ -31,20 +35,23 @@ fi
 
 # 2. Settings from the earlier project (/volume1/docker/barrier, or nas-vpn
 #    before the rename): login, locations and settings, plus the page password.
-if [ ! -e "$CONF/settings.json" ]; then
-	for OLD in "$OLDROOT/barrier" "$OLDROOT/nas-vpn"; do
-		if [ -e "$OLD/config/settings.json" ]; then
-			echo "Bringing over settings from the old project ($OLD)"
-			cp -a "$OLD/config/." "$CONF/"
-			PW=$(sed -n 's/^[[:space:]]*-[[:space:]]*UI_PASSWORD=//p' "$OLD/docker-compose.yml" 2>/dev/null | head -n1 | tr -d '\r' | sed "s/^[\"']//; s/[\"']$//")
-			if [ -n "$PW" ] && [ ! -e "$CONF/page-password" ]; then
-				(umask 077; printf '%s' "$PW" > "$CONF/page-password")
-				echo "Page password carried over"
-			fi
-			break
+for OLD in "$OLDROOT/barrier" "$OLDROOT/nas-vpn"; do
+	[ -e "$OLD/config/settings.json" ] || continue
+	if [ ! -e "$CONF/settings.json" ]; then
+		echo "Bringing over settings from the old project ($OLD)"
+		cp -R "$OLD/config/." "$CONF/"
+	fi
+	# The page password, once. Kept apart so a first try that failed half-way
+	# still brings it over, and a password removed later stays removed.
+	if [ ! -e "$CONF/.page-password-migrated" ]; then
+		PW=$(sed -n 's/^[[:space:]]*-[[:space:]]*UI_PASSWORD=//p' "$OLD/docker-compose.yml" 2>/dev/null | head -n1 | tr -d '\r' | sed "s/^[\"']//; s/[\"']$//")
+		if [ -n "$PW" ] && [ ! -e "$CONF/page-password" ]; then
+			(umask 077; printf '%s' "$PW" > "$CONF/page-password") && echo "Page password carried over"
 		fi
-	done
-fi
+		[ -e "$CONF/page-password" ] || [ -z "$PW" ] && touch "$CONF/.page-password-migrated"
+	fi
+	break
+done
 
 version() { cat "$1/VERSION" 2>/dev/null || echo 0; }
 # True when version $1 is newer than version $2.

@@ -8,6 +8,10 @@ services:
     pull_policy: never
     container_name: barrier
     restart: unless-stopped
+    # The VPN tunnel and the kill switch need root inside the container. Without
+    # this, DSM runs package containers as the package's own user and Barrier
+    # can't create the tunnel or save its settings.
+    user: "0:0"
     cap_add:
       - NET_ADMIN    # the tunnel and the kill switch
       - SYS_MODULE   # switch on the NAS's tun module, so no boot task is needed
