@@ -77,8 +77,28 @@ def should_start(info):
     return "network namespace" in (st.get("Error") or "")
 
 
+def needs_restart(info, me):
+    """Lifestream is running (or died trying) but started before Barrier's container last started."""
+    st = info.get("State", {})
+    if not st.get("Running") and "network namespace" not in (st.get("Error") or ""):
+        return False  # stopped on purpose: leave it
+    mine, theirs = _when(me.get("State", {}).get("StartedAt")), _when(st.get("StartedAt"))
+    return mine is not None and theirs is not None and theirs < mine
+
+
+def _when(stamp):
+    """Docker's RFC 3339 time (nanoseconds, trailing zeros dropped) as (seconds, nanoseconds)."""
+    import re
+    from datetime import datetime, timezone
+    m = re.match(r"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)(?:\.(\d+))?Z?$", stamp or "")
+    if not m or m.group(1).startswith("0001"):
+        return None
+    base = int(datetime.strptime(m.group(1), "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc).timestamp())
+    return (base, int((m.group(2) or "0").ljust(9, "0")[:9]))
+
+
 def check(log=print):
-    """Returns what happened: 'no-docker', 'no-lifestream', 'ok', 'rejoined', or 'error: ...'."""
+    """Returns what happened: 'no-docker', 'no-lifestream', 'ok', 'rejoined', 'restarted' or 'error: ...'."""
     if not available():
         return "no-docker"
     try:
@@ -94,6 +114,14 @@ def check(log=print):
         if not mode.startswith("container:"):
             return "ok"  # not using Barrier's network; leave it alone
         if mode[len("container:"):] in (me["Id"], ME):
+            if needs_restart(info, me):
+                # Barrier's container restarted after Lifestream started: Lifestream still sits
+                # in the old, empty network. A restart puts it into this one.
+                log("Barrier restarted after Lifestream; restarting Lifestream so it joins the new network")
+                code, out = _call("POST", "/containers/%s/restart?t=20" % TARGET, timeout=60)
+                if code not in (204, 304):
+                    return "error: couldn't restart Lifestream (%s %s)" % (code, out)
+                return "restarted"
             return "ok"
         start = should_start(info)
         spec = recreate_spec(info, me["Id"])

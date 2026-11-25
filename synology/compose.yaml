@@ -12,6 +12,10 @@ services:
     # this, DSM runs package containers as the package's own user and Barrier
     # can't create the tunnel or save its settings.
     user: "0:0"
+    environment:
+      # Lifestream shares this network: the kill switch is on from the first
+      # moment and can't be turned off.
+      - KILL_SWITCH_ALWAYS=1
     cap_add:
       - NET_ADMIN    # the tunnel and the kill switch
       - SYS_MODULE   # switch on the NAS's tun module, so no boot task is needed

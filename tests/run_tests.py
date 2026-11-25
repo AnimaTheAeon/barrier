@@ -205,10 +205,66 @@ def unit_firewall_rules():
     check(any("-o tun+ -j ACCEPT" in r for r in chain), "tunnel traffic must be allowed")
     check(any("-d 192.168.0.0/16" in r for r in chain), "LAN must be allowed")
     check(any("-p udp --dport 1195" in r for r in chain), "VPN handshake port must be allowed")
+    hs = [r for r in chain if "--dport 1195" in r]
+    check(hs and all("--uid-owner 0" in r and "!" not in r for r in hs), "only Barrier itself (root) may use the VPN handshake port: %s" % hs)
+    dns_block = [r for r in chain if "--dport 53" in r and "! --uid-owner 0 -j DROP" in r]
+    check(len(dns_block) == 2, "name lookups outside the tunnel must be blocked for everyone but Barrier")
+    check(any("-d 127.0.0.11" in r and "! --uid-owner 0" in r and r.endswith("DROP") for r in chain), "Docker's name server is Barrier's only")
+    order = lambda frag: next(i for i, r in enumerate(chain) if frag in r)
+    check(order("-o tun+") < order("--dport 53 -m owner ! --uid-owner 0"), "the tunnel must be allowed before the lookup blocks")
+    check(order("--dport 53 -m owner ! --uid-owner 0") < order("-d 192.168.0.0/16"), "lookups to the router (LAN) must be blocked first")
     check(any(r.startswith("ip6tables") and r.endswith("-j DROP") for r in rules), "IPv6 must be blocked")
     A.FW.rules_log.clear()
     A.FW.clear()
     check(any("-X NASVPN_KS" in r for r in A.FW.rules_log), "clear must delete the chain")
+
+
+@test
+def unit_home_ranges_only():
+    ok = A.clean_subnets(["192.168.1.0/24", "10.0.0.0/8", "172.20.0.0/16", "169.254.0.0/16"])
+    check(len(ok) == 4, ok)
+    for bad in ("0.0.0.0/0", "0.0.0.0/1", "128.0.0.0/1", "198.51.100.0/24", "8.8.8.8/32", "100.64.0.0/10", "127.0.0.0/8", "172.0.0.0/8"):
+        try:
+            A.clean_subnets([bad])
+            raise AssertionError("%s must be refused as a home range" % bad)
+        except ValueError:
+            pass
+
+
+@test
+def unit_ranges_that_lock_you_out():
+    check(A.would_lock_out("192.168.1.50", ["10.0.0.0/8"]), "a phone on 192.168.1.x would be cut off")
+    check(not A.would_lock_out("192.168.1.50", ["192.168.0.0/16"]))
+    check(not A.would_lock_out("172.17.0.1", ["172.16.0.0/12"]), "Docker's own gateway is covered by 172.16.0.0/12")
+    check(not A.would_lock_out("127.0.0.1", ["10.0.0.0/8"]), "the NAS itself always gets through")
+    check(not A.would_lock_out("", ["10.0.0.0/8"]))
+
+
+@test
+def kill_switch_locked_in_the_package():
+    global SRV
+    old = SRV
+    old.stop()
+    SRV = Server(dict(ENV, KILL_SWITCH_ALWAYS="1"))
+    SRV.start()
+    try:
+        code, body = call("/api/settings", "POST", {"kill_switch": False})
+        check(code == 400 and "always on" in body.get("error", ""), (code, body))
+        check(call("/api/settings")[1]["kill_switch"] is True)
+        st = call("/api/status")[1]
+        check(st["kill_switch"] is True and st["kill_switch_locked"] is True, st)
+        # Even a settings file saying otherwise can't turn it off.
+        p = os.path.join(CFG, "settings.json")
+        j = json.load(open(p)) if os.path.exists(p) else dict(call("/api/settings")[1])
+        j["kill_switch"] = False
+        json.dump(j, open(p, "w"))
+        check(call("/api/settings")[1]["kill_switch"] is True, "the file can't switch it off either")
+        check(call("/api/settings", "POST", {"auto_connect": False})[0] == 200, "other settings still save")
+    finally:
+        SRV.stop()
+        SRV = old
+        SRV.start()
+        call("/api/settings", "POST", {"kill_switch": True})
 
 
 @test

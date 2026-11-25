@@ -40,6 +40,10 @@ SCRIPT_DIR = os.environ.get("SCRIPT_DIR", os.path.join(os.path.dirname(os.path.a
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 TUN_DEV = "tun0"
 DRY_FIREWALL = os.environ.get("DRY_RUN_FIREWALL") == "1"
+# Set by the Synology package: Lifestream lives in this network, so the kill switch can't be turned off.
+# The package image sets BARRIER_UPDATE_DIR, so a package install is locked even before its
+# compose file says so (an in-app update only replaces the app).
+KS_LOCKED = os.environ.get("KILL_SWITCH_ALWAYS", "1" if os.environ.get("BARRIER_UPDATE_DIR") else "0") == "1"
 ENV_PASSWORD = os.environ.get("UI_PASSWORD", "")
 IP_CHECK_URL = os.environ.get("IP_CHECK_URL", "https://api.ipify.org")
 # Connected but nothing gets through for this long (seconds): restart the tunnel. 0 turns it off.
@@ -108,6 +112,8 @@ def load_settings():
             s.update(json.load(f))
     except (OSError, ValueError):
         pass
+    if KS_LOCKED:
+        s["kill_switch"] = True
     return s
 
 
@@ -119,6 +125,20 @@ def save_settings(s):
         os.replace(tmp, SETTINGS_FILE)
 
 
+HOME_RANGES = [ipaddress.ip_network(n) for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16")]
+
+
+def would_lock_out(remote_addr, nets):
+    """Would these home ranges leave out the device at remote_addr (so Barrier couldn't answer it)?"""
+    try:
+        me = ipaddress.ip_address((remote_addr or "").split("%")[0])
+    except ValueError:
+        return False
+    if me.version != 4 or me.is_loopback:
+        return False
+    return not any(me in ipaddress.ip_network(n) for n in nets)
+
+
 def clean_subnets(items):
     out = []
     for item in items:
@@ -128,6 +148,9 @@ def clean_subnets(items):
         net = ipaddress.ip_network(item, strict=False)  # raises ValueError if bad
         if net.version != 4:
             raise ValueError("only IPv4 ranges are supported")
+        # Only home-network ranges: anything else here would let traffic skip the VPN.
+        if not any(net.subnet_of(h) for h in HOME_RANGES):
+            raise ValueError("%s isn't a home-network range (use ranges inside 192.168.0.0/16, 10.0.0.0/8 or 172.16.0.0/12)" % net)
         out.append(str(net))
     return out
 
@@ -300,30 +323,100 @@ class Firewall:
                 self.bin4, self.bin6, self.available = b4, b6, True
                 return
 
+    def _owner_ok(self):
+        """Can rules match the program's user (xt_owner)? Needed to keep the DNS and
+        VPN-handshake exceptions to Barrier's own programs (root)."""
+        if DRY_FIREWALL:
+            return True
+        if getattr(self, "_owner", None) is None:
+            t = CHAIN + "_T"
+            self._run(self.bin4, "-N", t)
+            self._owner = self._run(self.bin4, "-A", t, "-m", "owner", "--uid-owner", "0", "-j", "RETURN") == 0
+            self._run(self.bin4, "-F", t)
+            self._run(self.bin4, "-X", t)
+        return self._owner
+
+    @staticmethod
+    def rules(lan_subnets, remote_ports, owner=True, v6=False):
+        """The kill-switch chain. Only the tunnel, the LAN and Barrier's own VPN handshake and
+        name lookups may leave; everyone else (Lifestream) gets the tunnel and the LAN only."""
+        root = ["-m", "owner", "--uid-owner", "0"] if owner else []
+        not_root = ["-m", "owner", "!", "--uid-owner", "0"] if owner else []
+        r = []
+        if not v6 and owner:
+            # Docker's own name server: only Barrier may use it (it answers from outside the tunnel).
+            r.append(["-o", "lo", "-d", "127.0.0.11"] + not_root + ["-j", "DROP"])
+        r.append(["-o", "lo", "-j", "ACCEPT"])
+        r.append(["-o", "tun+", "-j", "ACCEPT"])
+        if v6:
+            r.append(["-j", "DROP"])
+            return r
+        if owner:
+            # Name lookups outside the tunnel (to the router or anywhere): Barrier only.
+            for proto in ("udp", "tcp"):
+                r.append(["-p", proto, "--dport", "53"] + not_root + ["-j", "DROP"])
+        for net in lan_subnets:
+            r.append(["-d", net, "-j", "ACCEPT"])
+        if owner:
+            for proto in ("udp", "tcp"):
+                r.append(["-p", proto, "--dport", "53"] + root + ["-j", "ACCEPT"])
+        for proto, port in sorted(remote_ports):
+            r.append(["-p", proto, "--dport", str(port)] + root + ["-j", "ACCEPT"])
+        r.append(["-j", "DROP"])
+        return r
+
+    def _restore(self, binary, rules):
+        """Swap the whole chain in at once, so there's never a moment without it."""
+        text = "*filter\n:%s - [0:0]\n" % CHAIN
+        text += "".join("-A %s %s\n" % (CHAIN, " ".join(x)) for x in rules)
+        text += "COMMIT\n"
+        if DRY_FIREWALL:
+            self.rules_log.extend("%s -A %s %s" % (binary, CHAIN, " ".join(x)) for x in rules)
+            return 0
+        rbin = binary + "-restore"
+        if shutil.which(rbin):
+            try:
+                return subprocess.run([rbin, "-w", "--noflush"], input=text, capture_output=True, text=True, timeout=15).returncode
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+        # No restore tool: build a new chain beside the old one and switch over.
+        tmp = CHAIN + "_N"
+        self._run(binary, "-N", tmp)
+        self._run(binary, "-F", tmp)
+        for x in rules:
+            self._run(binary, "-A", tmp, *x)
+        self._run(binary, "-I", "OUTPUT", "1", "-j", tmp)
+        self._run(binary, "-N", CHAIN)
+        self._run(binary, "-F", CHAIN)
+        for x in rules:
+            self._run(binary, "-A", CHAIN, *x)
+        if self._run(binary, "-C", "OUTPUT", "-j", CHAIN) != 0:
+            self._run(binary, "-I", "OUTPUT", "1", "-j", CHAIN)
+        while self._run(binary, "-D", "OUTPUT", "-j", tmp) == 0:
+            pass
+        self._run(binary, "-F", tmp)
+        self._run(binary, "-X", tmp)
+        return 0
+
     def apply(self, lan_subnets, remote_ports):
-        """Block everything except loopback, the tunnel, the LAN and the VPN handshake ports."""
+        """Block everything except loopback, the tunnel, the LAN and Barrier's VPN handshake."""
         if not self.available:
             return False
         b = self.bin4
+        owner = self._owner_ok()
+        if not owner and not getattr(self, "_owner_warned", False):
+            self._owner_warned = True
+            print("Kill switch: this system can't tell programs apart, so the VPN handshake port is open to all of them", flush=True)
         self._run(b, "-N", CHAIN)
-        self._run(b, "-F", CHAIN)
-        self._run(b, "-A", CHAIN, "-o", "lo", "-j", "ACCEPT")
-        self._run(b, "-A", CHAIN, "-o", "tun+", "-j", "ACCEPT")
-        for net in lan_subnets:
-            self._run(b, "-A", CHAIN, "-d", net, "-j", "ACCEPT")
-        for proto, port in sorted(remote_ports):
-            self._run(b, "-A", CHAIN, "-p", proto, "--dport", str(port), "-j", "ACCEPT")
-        self._run(b, "-A", CHAIN, "-j", "DROP")
+        if self._restore(b, self.rules(lan_subnets, remote_ports, owner)) != 0:
+            return False
         if self._run(b, "-C", "OUTPUT", "-j", CHAIN) != 0:
             self._run(b, "-I", "OUTPUT", "1", "-j", CHAIN)
         # IPv6: nothing but loopback and the tunnel. Not every kernel has ip6tables; that's fine.
         b6 = self.bin6
         if b6 and (DRY_FIREWALL or shutil.which(b6)):
             self._run(b6, "-N", CHAIN)
-            self._run(b6, "-F", CHAIN)
-            self._run(b6, "-A", CHAIN, "-o", "lo", "-j", "ACCEPT")
-            self._run(b6, "-A", CHAIN, "-o", "tun+", "-j", "ACCEPT")
-            self._run(b6, "-A", CHAIN, "-j", "DROP")
+            self._restore(b6, self.rules([], set(), False, v6=True))
             if self._run(b6, "-C", "OUTPUT", "-j", CHAIN) != 0:
                 self._run(b6, "-I", "OUTPUT", "1", "-j", CHAIN)
         return True
@@ -603,6 +696,7 @@ class Vpn:
                 "rx": rx, "tx": tx,
                 "ip": self.ip,
                 "kill_switch": s["kill_switch"],
+                "kill_switch_locked": KS_LOCKED,
                 "firewall_ok": FW.available,
                 "auto_connect": s["auto_connect"],
                 "has_credentials": os.path.exists(AUTH_FILE),
@@ -712,18 +806,26 @@ def api_settings():
     s = load_settings()
     if request.method == "POST":
         d = request.get_json(silent=True) or {}
+        if KS_LOCKED and "kill_switch" in d and not d["kill_switch"]:
+            return err("The kill switch is always on here: Lifestream uses this connection and must never go around the VPN.")
         for k in ("kill_switch", "auto_connect", "auto_update"):
             if k in d:
                 s[k] = bool(d[k])
+        if KS_LOCKED:
+            s["kill_switch"] = True
         if d.get("protocol") in ("udp", "tcp"):
             s["protocol"] = d["protocol"]
         if "lan_subnets" in d:
             raw = d["lan_subnets"]
             items = raw.split(",") if isinstance(raw, str) else list(raw)
             try:
-                s["lan_subnets"] = clean_subnets(items)
+                nets = clean_subnets(items)
             except ValueError as e:
                 return err("That network range isn't valid: %s" % e)
+            # Never lock out the device making the change: Barrier answers it over these ranges.
+            if would_lock_out(request.remote_addr, nets):
+                return err("That would cut off this device (%s) from Barrier's page. Include its range too." % request.remote_addr)
+            s["lan_subnets"] = nets
         save_settings(s)
         # apply kill-switch change immediately
         with VPN.lock:

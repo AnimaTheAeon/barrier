@@ -198,7 +198,7 @@
   <div class="card">
     <h2>Settings</h2>
     <div class="toggle">
-      <div><div class="t">Kill switch</div><div class="hint">If the VPN drops, block internet for this container and anything attached to it. Your home network (LAN) keeps working.</div></div>
+      <div><div class="t">Kill switch</div><div class="hint" id="ksHint">If the VPN drops, block internet for this container and anything attached to it. Your home network (LAN) keeps working.</div></div>
       <label class="switch"><input type="checkbox" id="ks"><span></span></label>
     </div>
     <div class="toggle">
@@ -297,6 +297,8 @@ function renderStatus(s) {
   else { pl.textContent = 'Connect'; pb.disabled = !(s.has_credentials && s.location_count); }
 
   $('ks').checked = s.kill_switch; $('auto').checked = s.auto_connect;
+  $('ks').disabled = !!s.kill_switch_locked;
+  if (s.kill_switch_locked) $('ksHint').textContent = 'Always on: Lifestream uses this connection, so nothing may ever leave outside the VPN.';
   $('st1').classList.toggle('done', s.has_credentials);
   $('st2').classList.toggle('done', s.location_count > 0);
   $('st3').classList.toggle('done', s.state === 'connected');
@@ -405,7 +407,10 @@ $('clearBtn').onclick = async () => {
 };
 
 // ---- settings
-$('ks').onchange = () => api('/api/settings', 'POST', {kill_switch: $('ks').checked});
+$('ks').onchange = async () => {
+  try { await api('/api/settings', 'POST', {kill_switch: $('ks').checked}); }
+  catch (e) { $('ks').checked = true; alert(e.message); }
+};
 $('auto').onchange = () => api('/api/settings', 'POST', {auto_connect: $('auto').checked});
 async function loadSettings() { const s = await api('/api/settings'); $('lan').value = s.lan_subnets.join(', '); }
 $('saveLan').onclick = async () => {

@@ -2,6 +2,16 @@
 
 Each version's "- " lines become its release notes.
 
+## 1.1.8
+
+- The kill switch is always on and can't be turned off: Lifestream uses Barrier's connection, so nothing may ever leave outside the VPN
+- The kill switch is up from the very first moment the container starts, and changes to it swap in all at once, so there's never a gap
+- The VPN's own connection port is open only to Barrier itself. Before, any program in Barrier's network could reach any internet address on that port while the VPN was down
+- Name lookups outside the tunnel (to your router or Docker) are only for Barrier itself; Lifestream's lookups always go through the VPN
+- "Home network ranges" only accept real home ranges (192.168.x, 10.x, 172.16-31.x), and refuse a change that would cut off the device you're using
+- If Barrier's container restarts, Lifestream is restarted so it rejoins the network instead of sitting with no connection
+- Checked with a new leak test: real Barrier and Lifestream, a real VPN server, and a fake internet that logs every connection, across 11 failure cases. No leaks
+
 ## 1.1.7
 
 - Fixes the page: since 1.1.2 a typo in the page's script stopped every button from working (Connect, Check now, Check setup, Test kill switch) and left the version showing a dash

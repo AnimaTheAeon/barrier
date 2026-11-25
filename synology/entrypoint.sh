@@ -17,6 +17,45 @@ if [ "$(id -u)" != 0 ]; then
 fi
 mkdir -p "$CONF" "$UPD"
 
+# 0. Kill switch first, before anything else runs: until Barrier's app takes over
+#    (it swaps in its full rules in one step), only loopback, the tunnel, the LAN
+#    and Barrier's own name lookups may leave. Lifestream shares this network and
+#    may start any moment, so there must be no window without it.
+lockdown() {
+	for B in iptables-legacy iptables; do
+		command -v "$B-restore" >/dev/null 2>&1 && "$B" -w -L -n >/dev/null 2>&1 || continue
+		OWN="-m owner ! --uid-owner 0"
+		"$B" -w -N BARRIER_OWNER_T 2>/dev/null
+		"$B" -w -A BARRIER_OWNER_T -m owner --uid-owner 0 -j RETURN 2>/dev/null || OWN=""
+		"$B" -w -F BARRIER_OWNER_T 2>/dev/null; "$B" -w -X BARRIER_OWNER_T 2>/dev/null
+		{
+			echo "*filter"
+			echo ":NASVPN_KS - [0:0]"
+			[ -n "$OWN" ] && echo "-A NASVPN_KS -o lo -d 127.0.0.11 $OWN -j DROP"
+			echo "-A NASVPN_KS -o lo -j ACCEPT"
+			echo "-A NASVPN_KS -o tun+ -j ACCEPT"
+			[ -n "$OWN" ] && echo "-A NASVPN_KS -p udp --dport 53 $OWN -j DROP" && echo "-A NASVPN_KS -p tcp --dport 53 $OWN -j DROP"
+			for N in 192.168.0.0/16 172.16.0.0/12 10.0.0.0/8; do echo "-A NASVPN_KS -d $N -j ACCEPT"; done
+			[ -n "$OWN" ] && echo "-A NASVPN_KS -p udp --dport 53 -m owner --uid-owner 0 -j ACCEPT" && echo "-A NASVPN_KS -p tcp --dport 53 -m owner --uid-owner 0 -j ACCEPT"
+			echo "-A NASVPN_KS -j DROP"
+			echo "COMMIT"
+		} | "$B-restore" -w --noflush || continue
+		"$B" -w -C OUTPUT -j NASVPN_KS 2>/dev/null || "$B" -w -I OUTPUT 1 -j NASVPN_KS
+		B6=$(echo "$B" | sed 's/^iptables/ip6tables/')
+		if command -v "$B6-restore" >/dev/null 2>&1; then
+			printf '*filter\n:NASVPN_KS - [0:0]\n-A NASVPN_KS -o lo -j ACCEPT\n-A NASVPN_KS -o tun+ -j ACCEPT\n-A NASVPN_KS -j DROP\nCOMMIT\n' | "$B6-restore" -w --noflush 2>/dev/null \
+				&& { "$B6" -w -C OUTPUT -j NASVPN_KS 2>/dev/null || "$B6" -w -I OUTPUT 1 -j NASVPN_KS; }
+		fi
+		echo "Kill switch: on from the start ($B)"
+		return 0
+	done
+	echo "Kill switch: couldn't set up the firewall"
+	return 1
+}
+if [ "${KILL_SWITCH_ALWAYS:-}" = 1 ] || grep -q '"kill_switch": *true' "$CONF/settings.json" 2>/dev/null; then
+	lockdown
+fi
+
 # 1. The tunnel device. Synology doesn't load its tun module until something
 #    asks; the package lets this container load it (SYS_MODULE, /lib/modules).
 if [ -z "${BARRIER_SKIP_TUN:-}" ] && [ ! -c /dev/net/tun ]; then
