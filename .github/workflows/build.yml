@@ -43,10 +43,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view "v${{ steps.spk.outputs.version }}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
+          # A draft left by a publish that failed half-way doesn't count: remove it
+          # (and its tag) so this run publishes the release properly.
+          tag="v${{ steps.spk.outputs.version }}"
+          found=$(gh api "repos/${{ github.repository }}/releases?per_page=50" \
+            --jq ".[] | select(.tag_name == \"$tag\") | \"\(.id) \(.draft)\"" | head -n1)
+          if [ -z "$found" ]; then
             echo "exists=false" >> "$GITHUB_OUTPUT"
+          elif [ "${found#* }" = "true" ]; then
+            echo "Removing the unfinished draft of $tag"
+            gh api -X DELETE "repos/${{ github.repository }}/releases/${found%% *}"
+            gh api -X DELETE "repos/${{ github.repository }}/git/refs/tags/$tag" 2>/dev/null || true
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=true" >> "$GITHUB_OUTPUT"
           fi
       - name: Publish release
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.rel.outputs.exists == 'false'
