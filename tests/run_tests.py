@@ -23,7 +23,8 @@ os.makedirs(CFG)
 
 ENV = dict(os.environ, CONFIG_DIR=CFG, OPENVPN_BIN=MOCK, DRY_RUN_FIREWALL="1", UI_PASSWORD=PW, PORT=str(PORT),
            RUNTIME_CFG=RUNTIME, MOCK_LAUNCH_LOG=LAUNCH_LOG, SCRIPT_DIR=os.path.join(APP_DIR, "scripts"),
-           IP_CHECK_URL="http://127.0.0.1:9/")  # nothing listens there: network checks fail fast
+           IP_CHECK_URL="http://127.0.0.1:9/",  # nothing listens there: network checks fail fast
+           DNS_CHECK_NAMES="nothing.invalid", NO_INTERNET_RECONNECT="0")
 
 CERT = "<ca>\n-----BEGIN CERTIFICATE-----\nup /inside/block/stays\n-----END CERTIFICATE-----\n</ca>\n"
 
@@ -394,6 +395,51 @@ def autoconnect_after_restart():
     st = wait_state({"connected"}, timeout=15)
     check(st["state"] == "connected", "should reconnect by itself after a restart: %s" % st)
     call("/api/disconnect", "POST", {})
+
+
+@test
+def unit_no_internet_restart_rule():
+    sys.path.insert(0, APP_DIR)
+    import importlib
+    os.environ.setdefault("CONFIG_DIR", CFG)
+    app = importlib.import_module("app")
+    r = app.needs_restart
+    check(not r("connected", 1000, None, 2000, 180), "internet fine: no restart")
+    check(not r("connected", 1000, 1900, 2000, 180), "only 100s without internet: too soon")
+    check(r("connected", 1000, 1800, 2000, 180), "200s without internet: restart")
+    check(not r("connected", 1990, 1800, 2000, 180), "just connected: give it a minute")
+    check(not r("reconnecting", 1000, 1000, 2000, 180), "only while connected")
+    check(not r("connected", 1000, 1000, 9000, 0), "0 turns it off")
+
+
+@test
+def vpn_restarts_when_connected_without_internet():
+    global SRV
+    old = SRV
+    old.stop()
+    SRV = Server(dict(ENV, NO_INTERNET_RECONNECT="4"))
+    SRV.start()
+    try:
+        call("/api/connect", "POST", {"key": "usa_-_new_york"})
+        check(wait_state({"connected"})["state"] == "connected")
+        n = launches()
+        end = time.time() + 40
+        while time.time() < end and launches() == n:
+            time.sleep(0.5)
+        check(launches() > n, "a tunnel with no internet should be restarted")
+        st = wait_state({"connected"}, timeout=15)
+        check(st["state"] == "connected", "should come back connected to the same place: %s" % st)
+        logs = call("/api/logs")[1]
+        check("no internet through the VPN" in json.dumps(logs), "log should say why it reconnected")
+        call("/api/disconnect", "POST", {})
+        wait_state({"disconnected"})
+        n = launches()
+        time.sleep(8)
+        check(launches() == n, "no restarts once disconnected")
+    finally:
+        SRV.stop()
+        SRV = old
+        SRV.start()
 
 
 @test

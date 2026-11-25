@@ -2,6 +2,11 @@
 
 Each version's "- " lines become its release notes.
 
+## 1.1.3
+
+- If the VPN says it's connected but nothing gets through it (not even name lookups) for 3 minutes, Barrier reconnects by itself. Before, a dead tunnel could sit "connected" for hours and leave Lifestream stuck on "Getting info"
+- The Connection log says when and why it reconnected
+
 ## 1.1.2
 
 - A copy that can't install updates by itself now says how to turn updates on, instead of asking for a package install.

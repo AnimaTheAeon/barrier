@@ -39,6 +39,9 @@ TUN_DEV = "tun0"
 DRY_FIREWALL = os.environ.get("DRY_RUN_FIREWALL") == "1"
 ENV_PASSWORD = os.environ.get("UI_PASSWORD", "")
 IP_CHECK_URL = os.environ.get("IP_CHECK_URL", "https://api.ipify.org")
+# Connected but nothing gets through for this long (seconds): restart the tunnel. 0 turns it off.
+NO_INTERNET_RECONNECT = int(os.environ.get("NO_INTERNET_RECONNECT", "180"))
+DNS_CHECK_NAMES = os.environ.get("DNS_CHECK_NAMES", "one.one.one.one dns.google api.ipify.org").split()
 PORT = int(os.environ.get("PORT", "8085"))
 DNS_FALLBACK = os.environ.get("DNS_FALLBACK", "1.1.1.1")
 RUNTIME_CFG = os.environ.get("RUNTIME_CFG", "/tmp/barrier-runtime.ovpn")
@@ -342,6 +345,23 @@ FW = Firewall()
 LOG_RE_TIMESTAMP = re.compile(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d ")
 
 
+def names_resolve():
+    for name in DNS_CHECK_NAMES:
+        try:
+            socket.getaddrinfo(name, 443, proto=socket.IPPROTO_TCP)
+            return True
+        except OSError:
+            continue
+    return False
+
+
+def needs_restart(state, connected_at, no_net_since, now, limit):
+    """Connected for a bit (a minute, or less if the limit is shorter) and without internet for `limit` seconds."""
+    if limit <= 0 or state != "connected" or not connected_at or no_net_since is None:
+        return False
+    return now - connected_at >= min(60, limit) and now - no_net_since >= limit
+
+
 class Vpn:
     def __init__(self):
         self.lock = threading.RLock()
@@ -357,6 +377,7 @@ class Vpn:
         self.ip = None
         self.ip_checked = 0.0
         self.ip_busy = False
+        self.no_net_since = None  # when the internet check first failed while connected
 
     # ---- logging -----------------------------------------------------
     def _log(self, text):
@@ -440,6 +461,7 @@ class Vpn:
                     self.connected_at = time.time()
                     self.retry = 0
                     self.ip, self.ip_checked = None, time.time() - 117  # look up the new IP in ~3s
+                    self.no_net_since = None
                 elif "AUTH_FAILED" in line:
                     self.state = "auth_failed"
                     self.message = "ExpressVPN rejected the username/password. Re-enter them from the Manual Config page."
@@ -488,6 +510,13 @@ class Vpn:
         self.state, self.message = "disconnected", ""
         self.ip, self.ip_checked = None, 0.0
 
+    def _restart_locked(self):
+        """Stop OpenVPN but keep wanting the same location, so the watchdog starts it again."""
+        proc = self.proc
+        if proc and proc.poll() is None:
+            self.state, self.connected_at = "reconnecting", None
+            proc.terminate()  # the reader sees it exit and schedules the relaunch
+
     def disconnect(self):
         with self.lock:
             self._stop_locked()
@@ -504,6 +533,12 @@ class Vpn:
             with self.lock:
                 if self.desired and self.proc is None and time.time() >= self.next_try:
                     self._launch()
+                if needs_restart(self.state, self.connected_at, self.no_net_since, time.time(), NO_INTERNET_RECONNECT):
+                    mins = max(1, int((time.time() - self.no_net_since) // 60))
+                    self._log("Connected, but no internet through the VPN for %d minute%s; reconnecting"
+                              % (mins, "" if mins == 1 else "s"))
+                    self.no_net_since = None
+                    self._restart_locked()
             # public IP refresh
             if (self.state == "connected" or self.state == "disconnected") and not self.ip_busy \
                     and time.time() - self.ip_checked > 120:
@@ -520,9 +555,17 @@ class Vpn:
                 with urllib.request.urlopen(IP_CHECK_URL, timeout=6) as r:
                     ip = r.read(64).decode().strip()
                 self.ip = ip if re.match(r"^[0-9a-fA-F:.]+$", ip) else None
+                self.no_net_since = None
             except Exception:
                 self.ip = None
                 self.ip_checked = time.time() - 100  # try again in ~20s
+                # The IP service alone being down isn't an outage; name lookups failing too is.
+                if self.state == "connected" and not names_resolve():
+                    if self.no_net_since is None:
+                        self.no_net_since = time.time()
+                        self._log("No internet through the VPN (name lookups fail); reconnecting if it lasts")
+                else:
+                    self.no_net_since = None
             finally:
                 self.ip_busy = False
 
