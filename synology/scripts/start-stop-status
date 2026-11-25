@@ -1,9 +1,12 @@
 #!/bin/sh
 # Barrier runs in Container Manager (the "barrier" project). DSM starts and
 # stops that project together with the package, so there's nothing to run here.
-FLAG="$SYNOPKG_PKGVAR/.started"
+# The marker lives in /tmp: the package's own folder holds Barrier's settings,
+# which the container (running as root) owns, so the package user may not be
+# able to write there. /tmp is cleared on reboot, and DSM runs "start" at boot.
+FLAG="/tmp/.barrier-package-started"
 case "$1" in
-	start) touch "$FLAG"; exit 0 ;;
+	start) touch "$FLAG" || exit 1; exit 0 ;;
 	stop) rm -f "$FLAG"; exit 0 ;;
 	status) [ -f "$FLAG" ] && exit 0; exit 3 ;;
 esac

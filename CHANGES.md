@@ -2,6 +2,10 @@
 
 Each version's "- " lines become its release notes.
 
+## 1.1.5
+
+- Package Center shows Barrier as running again. It could say "Run" while Barrier was working fine
+
 ## 1.1.4
 
 - Fixes the package version not starting: DSM ran it without the rights it needs to build the VPN tunnel and save its settings, so it restarted over and over. It now runs with them
