@@ -26,6 +26,9 @@ import urllib.request
 import zipfile
 from collections import deque
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import rejoin  # noqa: E402
+
 from flask import Flask, Response, jsonify, request, send_from_directory
 
 # --------------------------------------------------------------------------
@@ -494,7 +497,11 @@ class Vpn:
             self.message = ""
             s = load_settings()
             s["last_config"] = filename
-            save_settings(s)
+            try:
+                save_settings(s)
+            except OSError as e:
+                # Connecting matters more than remembering the location.
+                self._log("Couldn't save settings (%s); connecting anyway" % e)
             self._launch()
 
     def _stop_locked(self):
@@ -1396,6 +1403,18 @@ def shutdown(*_):
         os._exit(0)
 
 
+def lifestream_keeper():
+    """Reattach Lifestream whenever Barrier's container has been replaced."""
+    time.sleep(int(os.environ.get("REJOIN_FIRST_DELAY", "5")))
+    last = None
+    while True:
+        result = rejoin.check(log=VPN._log)
+        if result.startswith("error") and result != last:
+            VPN._log("Couldn't reconnect Lifestream: " + result[len("error: "):])
+        last = result
+        time.sleep(int(os.environ.get("REJOIN_EVERY", "60")))
+
+
 def boot():
     s = load_settings()
     if s["kill_switch"]:
@@ -1423,6 +1442,7 @@ def boot():
     elif s["auto_connect"] and fn and os.path.exists(os.path.join(CONFIGS_DIR, fn)) and os.path.exists(AUTH_FILE):
         VPN.connect(fn)
     threading.Thread(target=UPD.loop, daemon=True).start()
+    threading.Thread(target=lifestream_keeper, daemon=True).start()
 
 
 if __name__ == "__main__":

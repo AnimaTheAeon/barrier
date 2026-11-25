@@ -413,6 +413,109 @@ def unit_no_internet_restart_rule():
 
 
 @test
+def unit_lifestream_rejoin_spec():
+    sys.path.insert(0, APP_DIR)
+    import rejoin
+    info = {
+        "Config": {"Image": "lifestream-package:1", "Hostname": "abc", "ExposedPorts": {"1/tcp": {}},
+                   "Env": ["A=1"], "Labels": {"com.docker.compose.project": "lifestream"}},
+        "HostConfig": {"NetworkMode": "container:old", "Binds": ["/v:/v"], "PortBindings": {},
+                       "RestartPolicy": {"Name": "unless-stopped"}, "Dns": []},
+        "State": {"Running": False, "Error": ""},
+    }
+    spec = rejoin.recreate_spec(info, "new")
+    check(spec["HostConfig"]["NetworkMode"] == "container:new", spec)
+    check("Hostname" not in spec and "ExposedPorts" not in spec, "network-only fields must go")
+    check(spec["Labels"]["com.docker.compose.project"] == "lifestream", "Container Manager must still see the project")
+    check(spec["HostConfig"]["Binds"] == ["/v:/v"] and spec["Env"] == ["A=1"], "settings must carry over")
+    check(info["HostConfig"]["NetworkMode"] == "container:old", "must not change the original")
+    check(not rejoin.should_start(info), "a stopped Lifestream stays stopped")
+    check(rejoin.should_start({"State": {"Running": True}}))
+    check(rejoin.should_start({"State": {"Running": False, "Error": "joining network namespace of container: No such container: x"}}),
+          "one that died because Barrier was replaced gets started")
+    old = rejoin.SOCK
+    rejoin.SOCK = os.path.join(TMP, "no-such.sock")
+    check(rejoin.check() == "no-docker")
+    rejoin.SOCK = old
+
+
+@test
+def package_carries_over_old_settings():
+    ep = os.path.join(os.path.dirname(HERE), "synology", "entrypoint.sh")
+    src = open(ep).read()
+    block = src[src.index("# 2. Settings from"):src.index("version() {")]
+    base = tempfile.mkdtemp(prefix="mig-", dir=TMP)
+    old, conf = os.path.join(base, "old"), os.path.join(base, "conf")
+
+    def w(path, text):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        open(path, "w").write(text)
+
+    def old_project():
+        w(os.path.join(old, "barrier", "config", "auth.txt"), "user\npass\n")
+        w(os.path.join(old, "barrier", "config", "settings.json"), '{"auto_connect": true, "last_config": "a_udp.ovpn"}')
+        w(os.path.join(old, "barrier", "config", "configs", "a_udp.ovpn"), "remote a\n")
+        w(os.path.join(old, "barrier", "config", "configs", "b_udp.ovpn"), "remote b\n")
+        w(os.path.join(old, "barrier", "docker-compose.yml"), "services:\n  b:\n    environment:\n      - UI_PASSWORD=pw1\n")
+
+    def start():
+        return subprocess.run(["sh", "-c", block], env=dict(os.environ, OLDROOT=old, CONF=conf),
+                              capture_output=True, text=True).stdout
+
+    def locs():
+        d = os.path.join(conf, "configs")
+        return sorted(os.listdir(d)) if os.path.isdir(d) else []
+
+    # The NAS's case: a first try died half-way and left empty files and the wrong settings.
+    old_project()
+    w(os.path.join(conf, "settings.json"), '{"auto_connect": false}')
+    w(os.path.join(conf, "auth.txt"), "")
+    w(os.path.join(conf, "configs", "a_udp.ovpn"), "")
+    out = start()
+    check("2 locations, login saved" in out, out)
+    check(open(os.path.join(conf, "auth.txt")).readline().strip() == "user")
+    check(locs() == ["a_udp.ovpn", "b_udp.ovpn"] and os.path.getsize(os.path.join(conf, "configs", "a_udp.ovpn")) > 0)
+    check('"auto_connect": true' in open(os.path.join(conf, "settings.json")).read(), "must reconnect by itself afterwards")
+    check(open(os.path.join(conf, "page-password")).read() == "pw1")
+
+    # Locations removed on purpose stay removed after a restart.
+    for f in locs():
+        os.remove(os.path.join(conf, "configs", f))
+    check("Bringing over" not in start() and locs() == [], "removed locations came back")
+
+    # Fresh install next to the old project.
+    shutil.rmtree(conf)
+    os.makedirs(conf)
+    check("2 locations" in start() and len(locs()) == 2)
+
+    # No old project: nothing happens.
+    shutil.rmtree(conf)
+    shutil.rmtree(old)
+    os.makedirs(conf)
+    start()
+    check(os.listdir(conf) == [], os.listdir(conf))
+    shutil.rmtree(base)
+
+
+@test
+def package_status_script():
+    script = os.path.join(os.path.dirname(HERE), "synology", "scripts", "start-stop-status")
+    flag = "/tmp/.barrier-package-started"
+    run = lambda a: subprocess.run(["sh", script, a], capture_output=True).returncode
+    try:
+        os.remove(flag)
+    except OSError:
+        pass
+    # The test server runs on PORT, not 8085, so the page never "answers" here.
+    check(run("status") == 3, "never started: not running")
+    check(run("start") == 0 and run("status") == 0, "just started: counts as running while it comes up")
+    old = time.time() - 600
+    os.utime(flag, (old, old))
+    check(run("status") == 3, "started long ago and the page never answered: not running")
+    check(run("stop") == 0 and not os.path.exists(flag))
+
+
+@test
 def vpn_restarts_when_connected_without_internet():
     global SRV
     old = SRV

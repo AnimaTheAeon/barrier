@@ -37,9 +37,27 @@ fi
 #    before the rename): login, locations and settings, plus the page password.
 for OLD in "$OLDROOT/barrier" "$OLDROOT/nas-vpn"; do
 	[ -e "$OLD/config/settings.json" ] || continue
-	if [ ! -e "$CONF/settings.json" ]; then
-		echo "Bringing over settings from the old project ($OLD)"
-		cp -R "$OLD/config/." "$CONF/"
+	# Once: bring over the login, locations and settings. A first try that died
+	# half-way (empty or missing files) is finished here; after it's complete
+	# it never runs again, so locations removed later stay removed.
+	if [ ! -e "$CONF/.migrated" ]; then
+		[ -e "$CONF/auth.txt" ] && [ ! -s "$CONF/auth.txt" ] && rm -f "$CONF/auth.txt"
+		for f in "$CONF"/configs/*.ovpn; do [ -e "$f" ] && [ ! -s "$f" ] && rm -f "$f"; done
+		have_loc() { for f in "$CONF"/configs/*.ovpn; do [ -s "$f" ] && return 0; done; return 1; }
+		if [ ! -s "$CONF/settings.json" ] || [ ! -s "$CONF/auth.txt" ] || ! have_loc; then
+			echo "Bringing over settings from the old project ($OLD)"
+			cp -Rn "$OLD/config/." "$CONF/"
+			# The settings here came from the failed try (or don't exist): use the old
+			# ones, so it reconnects to the same location by itself.
+			cp -f "$OLD/config/settings.json" "$CONF/settings.json"
+			chmod 600 "$CONF/auth.txt" 2>/dev/null
+		fi
+		if [ -s "$CONF/auth.txt" ] && have_loc; then
+			touch "$CONF/.migrated"
+			echo "Old settings in place: $(ls "$CONF"/configs/*.ovpn | wc -l) locations, login saved"
+		else
+			echo "Couldn't bring over the old login or locations from $OLD"
+		fi
 	fi
 	# The page password, once. Kept apart so a first try that failed half-way
 	# still brings it over, and a password removed later stays removed.

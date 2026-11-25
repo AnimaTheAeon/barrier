@@ -1,13 +1,23 @@
 #!/bin/sh
 # Barrier runs in Container Manager (the "barrier" project). DSM starts and
 # stops that project together with the package, so there's nothing to run here.
-# The marker lives in /tmp: the package's own folder holds Barrier's settings,
-# which the container (running as root) owns, so the package user may not be
-# able to write there. /tmp is cleared on reboot, and DSM runs "start" at boot.
+# "Running" means Barrier's page answers. Right after a start it gets two
+# minutes to come up before it counts as stopped. The start marker sits in
+# /tmp, which the package user can always write.
 FLAG="/tmp/.barrier-package-started"
+answers() {
+	if command -v curl >/dev/null 2>&1; then
+		curl -fs -m 3 -o /dev/null http://127.0.0.1:8085/api/health
+	else
+		wget -q -T 3 -O /dev/null http://127.0.0.1:8085/api/health
+	fi
+}
 case "$1" in
-	start) touch "$FLAG" || exit 1; exit 0 ;;
+	start) touch "$FLAG" 2>/dev/null; exit 0 ;;
 	stop) rm -f "$FLAG"; exit 0 ;;
-	status) [ -f "$FLAG" ] && exit 0; exit 3 ;;
+	status)
+		answers && exit 0
+		[ -n "$(find "$FLAG" -mmin -2 2>/dev/null)" ] && exit 0
+		exit 3 ;;
 esac
 exit 0

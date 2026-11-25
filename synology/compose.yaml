@@ -25,6 +25,9 @@ services:
       # Read once on the first start, to bring over the old project's settings.
       - /volume1/docker:/old:ro
       - /etc/localtime:/etc/localtime:ro
+      # Only to reattach Lifestream after this container is replaced (package
+      # install or upgrade); Docker otherwise leaves it with no network.
+      - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8085/api/health', timeout=3)"]
       interval: 15s

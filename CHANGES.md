@@ -2,6 +2,13 @@
 
 Each version's "- " lines become its release notes.
 
+## 1.1.6
+
+- Finishes bringing over your login, locations and settings from the old Container Manager setup if an earlier start stopped half-way, so it connects to your usual location by itself. This happens once; locations you remove later stay removed
+- Lifestream reconnects to Barrier by itself within a minute after Barrier is installed or upgraded. No more reinstalling Lifestream
+- Package Center shows "Running" exactly when Barrier's page is up
+- A settings file that can't be saved no longer stops Barrier from connecting
+
 ## 1.1.5
 
 - Package Center shows Barrier as running again. It could say "Run" while Barrier was working fine
