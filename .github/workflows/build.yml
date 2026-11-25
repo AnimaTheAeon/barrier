@@ -19,7 +19,7 @@ jobs:
           python-version: "3.12"
       - name: Test
         run: |
-          pip install "flask==3.*"
+          pip install "flask==3.*" playwright
           python3 tests/run_tests.py
       - name: Build .spk and app download
         id: spk

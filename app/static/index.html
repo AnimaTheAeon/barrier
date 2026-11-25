@@ -490,7 +490,7 @@ function renderUpdate(u) {
   }
   const r = u.last_result;
   $('updLast').innerHTML = r && r.time ? (r.ok ? 'Last update: ' + esc(r.message) : '<span class="bad-t">Last update didn\'t work: ' + esc(r.message) + '</span>') + ' · ' + new Date(r.time * 1000).toLocaleString() : '';
-  if (!u.can_install && u.available) $('updLast').innerHTML += '<br>This copy can't install updates by itself. Reinstall Barrier from its Synology package once to turn updates on.';
+  if (!u.can_install && u.available) $('updLast').innerHTML += "<br>This copy can't install updates by itself. Reinstall Barrier from its Synology package once to turn updates on.";
   $('updNotesWrap').style.display = u.available && u.notes ? '' : 'none';
   $('updNotes').textContent = u.notes || '';
   if (document.activeElement !== $('autoUpd')) $('autoUpd').checked = !!u.auto_update;

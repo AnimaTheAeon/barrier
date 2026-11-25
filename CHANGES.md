@@ -2,6 +2,11 @@
 
 Each version's "- " lines become its release notes.
 
+## 1.1.7
+
+- Fixes the page: since 1.1.2 a typo in the page's script stopped every button from working (Connect, Check now, Check setup, Test kill switch) and left the version showing a dash
+- Every release is now tested by opening the page in a real browser and using each of those buttons
+
 ## 1.1.6
 
 - Finishes bringing over your login, locations and settings from the old Container Manager setup if an earlier start stopped half-way, so it connects to your usual location by itself. This happens once; locations you remove later stay removed

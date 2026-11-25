@@ -607,10 +607,16 @@ class _Quiet(http.server.SimpleHTTPRequestHandler):
         pass
 
 
+_REL_SERVER = []
+
+
 def _serve_releases():
     os.makedirs(REL_DIR, exist_ok=True)
+    if _REL_SERVER:
+        return
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", REL_PORT), _Quiet)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
+    _REL_SERVER.append(srv)
 
 
 UPD_ENV = dict(ENV, BARRIER_UPDATE_DIR=UPD_DIR, BARRIER_RELEASE_URL="http://127.0.0.1:%d/latest.json" % REL_PORT)
@@ -686,6 +692,98 @@ def update_unavailable_without_package():
     check(not u["can_install"], "without the package script it can't update itself")
     code, j = call("/api/update/install", "POST")
     check(code == 400 and "package" in j.get("error", ""), "install should be refused: %s %s" % (code, j))
+
+@test
+def page_script_is_valid():
+    """The whole page breaks if its script has one syntax error (1.1.2–1.1.6: an apostrophe)."""
+    node = shutil.which("node")
+    if not node:
+        raise RuntimeError("node is needed to check the page's script")
+    import re
+    html = open(os.path.join(APP_DIR, "static", "index.html")).read()
+    js = os.path.join(TMP, "page.js")
+    open(js, "w").write("\n".join(re.findall(r"<script>(.*?)</script>", html, re.S)))
+    r = subprocess.run([node, "--check", js], capture_output=True, text=True)
+    check(r.returncode == 0, r.stderr.strip()[:400])
+
+
+@test
+def page_buttons_work_in_a_browser():
+    """Opens the real page in Chrome and uses it like a person would."""
+    from playwright.sync_api import sync_playwright
+    chrome = shutil.which("google-chrome") or shutil.which("chromium") or shutil.which("chromium-browser")
+    if not chrome:
+        raise RuntimeError("Chrome is needed for the browser test")
+    _serve_releases()
+    release("9.9.9")
+    _with_update_server()
+    call("/api/credentials", "POST", {"username": "u", "password": "p"})
+    os.makedirs(os.path.join(CFG, "configs"), exist_ok=True)
+    open(os.path.join(CFG, "configs", "my_expressvpn_usa_-_new_york_udp.ovpn"), "w").write(ovpn())
+    call("/api/settings", "POST", {"auto_update": False, "kill_switch": True})
+    call("/api/disconnect", "POST", {})
+    call("/api/connect", "POST", {"key": "usa_-_new_york"})   # remembers it as the last location
+    wait_state({"connected"})
+    call("/api/disconnect", "POST", {})
+    wait_state({"disconnected"})
+    errors = []
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(executable_path=chrome, args=["--no-sandbox"])
+        page = browser.new_context(http_credentials={"username": "me", "password": PW}).new_page()
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.on("dialog", lambda d: d.accept())
+        page.goto("http://127.0.0.1:%d/" % PORT)
+        T = 20000
+
+        # The page's script runs: status and version fill in.
+        page.wait_for_function("document.getElementById('stateText').textContent === 'Not connected'", timeout=T)
+        page.wait_for_function("!document.getElementById('updState').textContent.includes('–')", timeout=T)
+        check(not errors, "script errors on load: %s" % errors)
+
+        # Connect, then Disconnect, with the big button.
+        page.click("#power")
+        page.wait_for_function("document.getElementById('stateText').textContent === 'Connected'", timeout=T)
+        check(page.text_content("#powerLabel") == "Disconnect")
+        page.click("#power")
+        page.wait_for_function("document.getElementById('stateText').textContent === 'Not connected'", timeout=T)
+
+        # Check now finds the newer version and shows Update now.
+        page.click("#updCheck")
+        page.wait_for_function("document.getElementById('updState').textContent.includes('9.9.9 is available')", timeout=T)
+        check(page.is_visible("#updNow"), "Update now should appear")
+
+        # Check setup runs and reports.
+        page.click("#testBtn")
+        page.wait_for_function("document.getElementById('testRes').children.length > 0 && document.getElementById('testSum').textContent.length > 0", timeout=60000)
+
+        # Kill switch test: while disconnected it says to connect first.
+        page.click("#deepBtn")
+        page.wait_for_function("/connect/i.test(document.getElementById('testStep').textContent)", timeout=T)
+
+        # Connected: it actually runs, shows its steps, and finishes with results.
+        page.click("#power")
+        page.wait_for_function("document.getElementById('stateText').textContent === 'Connected'", timeout=T)
+        page.click("#deepBtn")
+        page.wait_for_function("document.getElementById('testStep').textContent.length > 0 && document.getElementById('deepBtn').disabled", timeout=T)
+        page.wait_for_function("!document.getElementById('deepBtn').disabled && document.getElementById('testSum').textContent.length > 0", timeout=150000)
+        names = page.text_content("#testRes")
+        check("kill switch" in names.lower() or "VPN is down" in names, "kill switch results should show: %s" % names[:300])
+
+        # Update now downloads it, shows its progress, and Barrier exits to swap it in.
+        page.click("#updNow")
+        page.wait_for_function("document.getElementById('updBarWrap').style.display === ''", timeout=T)
+        try:
+            code = SRV.proc.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            raise AssertionError("Update now should make Barrier restart into the update")
+        SRV.proc = None
+        check(code == 75, "should exit with 75 to swap in the update, got %s" % code)
+        # (On the NAS the start script swaps it in here.) The page picks Barrier up again.
+        SRV.start()
+        page.wait_for_function("['Connected','Reconnecting…','Connecting…'].includes(document.getElementById('stateText').textContent)", timeout=T)
+        check(not errors, "script errors while using the page: %s" % errors)
+        browser.close()
+    call("/api/disconnect", "POST", {})
 
 
 # ================================================================ runner
